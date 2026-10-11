@@ -16,8 +16,9 @@ class GitHubCode(Provider):
     name = "GitHub code search"
     summary = (
         "Searches public file contents through the official code-search API. "
-        "A classic personal access token with public-repository access is enough. "
-        "Gist contents are not in this index."
+        "Use a token with public-only access: a classic token with only the public_repo scope, "
+        "or a fine-grained token limited to public repositories. Do not use the full repo scope. "
+        "Queries include is:public. Gist contents are not in this index."
     )
 
     def configured(self) -> bool:
@@ -31,7 +32,8 @@ class GitHubCode(Provider):
         missing = missing_key(
             self,
             "GITHUB_TOKEN",
-            "Create a GitHub personal access token (no paid plan). Code search allows about 10 requests a minute.",
+            "Create a GitHub token with public-only access (classic public_repo, or a fine-grained "
+            "public-repository token). Do not use the full repo scope. Code search allows about 10 requests a minute.",
         )
         if missing:
             return missing
@@ -41,7 +43,7 @@ class GitHubCode(Provider):
                 client,
                 "GET",
                 ENDPOINT,
-                params={"q": f'"{phrase}"', "per_page": "10"},
+                params={"q": f'"{phrase}" is:public', "per_page": "10"},
                 headers={
                     "Authorization": f"Bearer {env_value('GITHUB_TOKEN')}",
                     "Accept": "application/vnd.github.text-match+json",
@@ -68,10 +70,15 @@ class GitHubCode(Provider):
 
         hits = []
         for row in (payload.get("items") or [])[:10]:
+            if not isinstance(row, dict):
+                continue
+            repository = row.get("repository") if isinstance(row.get("repository"), dict) else {}
+            if row.get("private") is True or repository.get("private") is True:
+                continue
             url = row.get("html_url") or ""
             if not url.startswith("https://github.com/"):
                 continue
-            repo = (row.get("repository") or {}).get("full_name") or "repository"
+            repo = repository.get("full_name") or "repository"
             fragments = [match.get("fragment") or "" for match in row.get("text_matches") or []]
             snippet = clean_snippet(" ".join(fragments) or row.get("path") or "")
             hits.append(
@@ -83,9 +90,11 @@ class GitHubCode(Provider):
                     source="github.com",
                 )
             )
+        incomplete = payload.get("incomplete_results") is True
+        partial = " Partial result. GitHub marked the result incomplete." if incomplete else ""
         if not hits:
             return self.finish(
                 Status.NO_RESULTS,
-                "GitHub code search returned no public files. Gist contents are not in this index.",
+                "GitHub code search returned no public files. Gist contents are not in this index." + partial,
             )
-        return self.finish(Status.OK, f"GitHub code search returned {len(hits)} file(s).", hits)
+        return self.finish(Status.OK, f"GitHub code search returned {len(hits)} file(s).{partial}", hits)

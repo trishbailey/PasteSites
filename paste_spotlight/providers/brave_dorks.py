@@ -56,8 +56,11 @@ class BraveDorks(Provider):
             return self.finish(Status.ERROR, "Brave rejected the API key.")
         if response.status_code == 429:
             return self.finish(Status.BLOCKED, "Brave rate-limited this key. Wait before searching again.")
-        if response.status_code == 422:
-            return self.finish(Status.ERROR, "Brave could not validate the request. Check the API key.")
+        if response.status_code in {400, 422}:
+            return self.finish(
+                Status.ERROR,
+                "Brave rejected the query. It may be too long for one request.",
+            )
         if response.status_code != 200:
             return self.finish(Status.ERROR, f"Brave returned HTTP {response.status_code}.")
 

@@ -10,6 +10,7 @@ class Status(str, Enum):
     BLOCKED = "blocked"
     NEEDS_KEY = "needs_key"
     ERROR = "error"
+    SKIPPED = "skipped"
 
 
 @dataclass

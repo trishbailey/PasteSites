@@ -16,7 +16,8 @@ class GitHubPublic(Provider):
     id = "github_public"
     name = "GitHub commits and repositories"
     summary = (
-        "Official search API for commit messages and repository names, descriptions, and topics. "
+        "Official search API for public commit messages and public repository names, descriptions, and topics. "
+        "Queries include is:public and skip private repositories. "
         "Works without a token (about 10 searches a minute). File contents are a separate provider."
     )
     readiness = "ready"
@@ -31,13 +32,14 @@ class GitHubPublic(Provider):
         hits: list[Hit] = []
         notes: list[str] = []
         failures = 0
+        incomplete = False
         for label, url in (("commits", COMMITS), ("repositories", REPOS)):
             try:
                 response = guarded_request(
                     client,
                     "GET",
                     url,
-                    params={"q": f'"{phrase}"', "per_page": "5"},
+                    params={"q": f'"{phrase}" is:public', "per_page": "5"},
                     headers=headers,
                 )
             except UnsafeURL:
@@ -62,26 +64,51 @@ class GitHubPublic(Provider):
                 failures += 1
                 notes.append(f"{label}: response was not JSON")
                 continue
+            if payload.get("incomplete_results") is True:
+                incomplete = True
+                notes.append(f"{label}: incomplete results")
             if label == "commits":
                 hits.extend(_commit_hits(payload))
             else:
                 hits.extend(_repo_hits(payload))
 
         scope = (
-            "Matches commit messages and repository metadata. "
+            "Matches public commit messages and public repository metadata. "
             "File contents are searched only by the GitHub code provider when GITHUB_TOKEN is set."
         )
+        detail = (" " + " ".join(notes)) if notes else ""
+        if failures and not hits:
+            return self.finish(Status.ERROR, f"GitHub search failed.{detail} {scope}")
+        if failures:
+            return self.finish(
+                Status.ERROR,
+                f"Partial result. GitHub returned {len(hits)} public result(s), but a call failed.{detail} {scope}",
+                hits,
+            )
         if hits:
-            extra = f" {' '.join(notes)}" if notes else ""
-            return self.finish(Status.OK, f"GitHub returned {len(hits)} public result(s). {scope}{extra}", hits)
-        if failures == 2:
-            return self.finish(Status.ERROR, "GitHub search failed. " + " ".join(notes))
+            prefix = "Partial result. " if incomplete else ""
+            extra = " GitHub marked the result incomplete." if incomplete else ""
+            return self.finish(Status.OK, f"{prefix}GitHub returned {len(hits)} public result(s). {scope}{extra}", hits)
+        if incomplete:
+            return self.finish(
+                Status.NO_RESULTS,
+                f"Partial result. No public commits or repositories matched. GitHub marked the result incomplete. {scope}",
+            )
         return self.finish(Status.NO_RESULTS, f"No public commits or repositories matched. {scope}")
+
+
+def _is_private(row: dict) -> bool:
+    if row.get("private") is True:
+        return True
+    repository = row.get("repository")
+    return isinstance(repository, dict) and repository.get("private") is True
 
 
 def _commit_hits(payload: dict) -> list[Hit]:
     hits = []
     for row in (payload.get("items") or [])[:5]:
+        if not isinstance(row, dict) or _is_private(row):
+            continue
         commit = row.get("commit") or {}
         url = row.get("html_url") or ""
         if not url.startswith("https://github.com/"):
@@ -102,6 +129,8 @@ def _commit_hits(payload: dict) -> list[Hit]:
 def _repo_hits(payload: dict) -> list[Hit]:
     hits = []
     for row in (payload.get("items") or [])[:5]:
+        if not isinstance(row, dict) or _is_private(row):
+            continue
         url = row.get("html_url") or ""
         if not url.startswith("https://github.com/"):
             continue

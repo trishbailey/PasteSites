@@ -175,6 +175,7 @@ fieldset {
 .pill.blocked { background: var(--blocked-bg); color: var(--blocked); }
 .pill.needs_key { background: var(--key-bg); color: var(--key); }
 .pill.error { background: var(--error-bg); color: var(--error); }
+.pill.skipped { background: var(--status_only-bg); color: var(--status_only); }
 
 .banner {
   padding: 0.7rem 0.8rem;

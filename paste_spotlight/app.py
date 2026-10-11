@@ -5,6 +5,7 @@ import hmac
 import io
 import logging
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
+from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from paste_spotlight import __version__
@@ -24,23 +26,42 @@ from paste_spotlight.auth import (
     password_configured,
     password_matches,
     read_session,
+    revoke_session,
     safe_next,
 )
 from paste_spotlight.config import (
     ip_searches_per_hour,
     login_attempts_per_hour,
     searches_per_hour,
+    session_secret,
 )
 from paste_spotlight.http_guard import make_client
+from paste_spotlight.logutil import install_log_redaction, redact
 from paste_spotlight.providers import PROVIDERS
 from paste_spotlight.ratelimit import RateLimiter, client_ip
-from paste_spotlight.search import STORE, run_search
+from paste_spotlight.search import STORE, normalize_provider_ids, run_search
 from paste_spotlight.validate import ValidationError, validate_query
 
 log = logging.getLogger("paste_spotlight")
 PACKAGE = Path(__file__).resolve().parent
+install_log_redaction()
 
-app = FastAPI(title="Paste Site Spotlight", version=__version__, docs_url=None, redoc_url=None, openapi_url=None)
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    install_log_redaction()
+    session_secret()
+    yield
+
+
+app = FastAPI(
+    title="Paste Site Spotlight",
+    version=__version__,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    lifespan=_lifespan,
+)
 app.mount("/static", StaticFiles(directory=str(PACKAGE / "static")), name="static")
 templates = Jinja2Templates(directory=str(PACKAGE / "templates"))
 LIMITER = RateLimiter()
@@ -94,6 +115,12 @@ def _provider_rows(selected: set[str] | None = None) -> list[dict]:
 def _render(request: Request, name: str, context: dict, status_code: int = 200):
     payload = {"request": request, "app_name": "Paste Site Spotlight", "version": __version__, **context}
     return templates.TemplateResponse(request, name, payload, status_code=status_code)
+
+
+def _perform_search(query, selected):
+    """Blocking provider calls stay off the event loop so /health can answer."""
+    with make_client() as client:
+        return run_search(query, selected, client)
 
 
 def _csv_safe(value: str) -> str:
@@ -185,7 +212,7 @@ async def http_error(request: Request, exc: StarletteHTTPException):
 
 @app.exception_handler(Exception)
 async def unhandled(request: Request, exc: Exception):
-    log.exception("unhandled error")
+    log.error("unhandled error: %s", redact(f"{type(exc).__name__}: {exc}"))
     return _render(
         request,
         "error.html",
@@ -307,6 +334,7 @@ async def logout(request: Request):
             {"message": "The sign-out form expired. Refresh the page and try again.", "status_code": 400},
             status_code=400,
         )
+    revoke_session(str(session.get("sid") or ""))
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(COOKIE_NAME, path="/")
     return response
@@ -350,7 +378,7 @@ async def search(request: Request):
         )
     kind = str(form.get("kind") or "keyword")
     text = str(form.get("q") or "")
-    selected = [item for item in form.getlist("providers") if item in {provider.id for provider in PROVIDERS}]
+    selected = normalize_provider_ids([str(item) for item in form.getlist("providers")])
     limit = searches_per_hour()
     base = {
         "csrf": session["csrf"],
@@ -379,8 +407,7 @@ async def search(request: Request):
     LIMITER.allow(session_key, limit)
     LIMITER.allow(ip_key, ip_searches_per_hour())
 
-    with make_client() as client:
-        results = run_search(query, selected, client)
+    results = await run_in_threadpool(_perform_search, query, selected)
     payload = {
         "query": query.text,
         "kind": query.kind,

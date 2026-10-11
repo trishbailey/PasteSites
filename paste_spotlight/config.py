@@ -24,12 +24,12 @@ def access_password() -> str:
 
 def session_secret() -> bytes:
     explicit = os.environ.get("SESSION_SECRET", "").strip()
-    if explicit:
-        return explicit.encode("utf-8")
-    password = access_password()
-    if not password:
-        return b""
-    return ("paste-site-spotlight:" + password).encode("utf-8")
+    if len(explicit) < 32:
+        raise RuntimeError(
+            "SESSION_SECRET must be set to a random string of at least 32 characters. "
+            "The app will not start without it."
+        )
+    return explicit.encode("utf-8")
 
 
 def searches_per_hour() -> int:

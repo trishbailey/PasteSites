@@ -7,13 +7,20 @@ services:
     branch: main
     autoDeployTrigger: commit
     buildCommand: pip install -r requirements.txt
-    startCommand: "uvicorn paste_spotlight.app:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=*"
+    # No --proxy-headers and no --forwarded-allow-ips. Those flags trust
+    # X-Forwarded-For and rewrite request.client.host. A client can spoof that
+    # header, and on Render the last hop is the platform proxy. The app reads
+    # CF-Connecting-IP when it is a valid address, otherwise the socket peer.
+    # Secure cookies use the raw X-Forwarded-Proto header and do not need those flags.
+    startCommand: "uvicorn paste_spotlight.app:app --host 0.0.0.0 --port $PORT"
     healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
       - key: APP_ACCESS_PASSWORD
         sync: false
       - key: SESSION_SECRET
-        sync: false
+        generateValue: true
       - key: SEARCHES_PER_HOUR
         value: "8"
       - key: IP_SEARCHES_PER_HOUR

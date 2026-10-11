@@ -1,6 +1,6 @@
 # Paste Site Spotlight
 
-Search public paste hosts and optional breach indexes for an email, domain, username, or keyword. Each provider returns its own status: **ok**, **no results**, **blocked**, **needs key**, or **error**. A provider that cannot run says so. It does not disappear into an empty page.
+Search public paste hosts and optional breach indexes for an email, domain, username, or keyword. Each provider returns its own status: **ok**, **no results**, **blocked**, **needs key**, **error**, or **skipped**. A provider that cannot run says so. It does not disappear into an empty page.
 
 This replaces SelectorScope, which only called Google Programmable Search and reported a blank result set whenever that call was missing, refused, or empty.
 
@@ -70,12 +70,12 @@ The "method" column is the same for every row, because the app never contacted t
 
 | Provider | Live check on 11 Oct 2026 | What it needs |
 | --- | --- | --- |
-| GitHub commits and repositories | **Working.** `HelloWorldMessage` returned commits (`total_count` 41) and repository hits with no token. | Nothing. A `GITHUB_TOKEN` raises the rate limit. Matches commit messages and repository metadata, not file bodies. |
-| GitHub code search | **Needs key.** Unauthenticated call returned HTTP 401 `Requires authentication`. | Free GitHub personal access token. About 10 code searches a minute. Does not index gists. |
+| GitHub commits and repositories | **Working.** `HelloWorldMessage` returned commits (`total_count` 41) and repository hits with no token. | Nothing. A `GITHUB_TOKEN` raises the rate limit. Queries add `is:public` and skip private repositories. Matches public commit messages and public repository metadata, not file bodies. |
+| GitHub code search | **Needs key.** Unauthenticated call returned HTTP 401 `Requires authentication`. | Free GitHub token with public-only access. About 10 code searches a minute. Queries add `is:public`. Does not index gists. |
 | GitHub Gist | **Blocked on purpose.** `robots.txt` disallows `/gist/` and `/search`. | No scrape. Indexed gist pages come from the Brave or Google dork, which includes `site:gist.github.com`. |
 | Brave Search dorks | **Needs key.** Call without a token returned HTTP 422, missing `X-Subscription-Token`. | Brave Search API key. One request covers the paste-host list. |
 | Google Programmable Search | **Needs key.** Call without a key returned HTTP 403. | `GOOGLE_CSE_API_KEY` and `GOOGLE_CSE_ID`. One request, not one per site. The engine must search the whole web. |
-| Have I Been Pwned | **Needs key.** Paste and breach calls returned HTTP 401 `missing hibp-api-key`. | Paid API key. Email queries only. Returns breach and paste metadata, not dump files. |
+| Have I Been Pwned | **Needs key.** Paste and breach calls returned HTTP 401 `missing hibp-api-key`. | Paid API key. Email queries only. Any other query type is **skipped** and no request is sent. Returns breach and paste metadata, not dump files. |
 | Intelligence X | **Needs key.** `free.intelx.io` and `public.intelx.io` returned HTTP 401 with no key. | Free account key for your own lookups. Results are titles and links. File bodies are not downloaded. |
 | Pastebin scraping API | **Blocked without a whitelist.** `scrape.pastebin.com` returned HTTP 403 "YOUR IP DOES NOT HAVE ACCESS". | `PASTEBIN_SCRAPING_ENABLED=true` on a whitelisted PRO IP. Recent pastes only. |
 | psbdmp | **Blocked.** `psbdmp.ws` does not resolve. `psbdmp.cc` is Weakpass. | Nothing to configure. The status is reported on every search. The user query is not sent. |
@@ -85,7 +85,7 @@ Dork hosts: pastebin.com, paste.ee, justpaste.it, rentry.co, dpaste.com, dpaste.
 ### Keys that add the most coverage
 
 1. **Brave Search API** — broadest paste-host coverage in one query. Monthly credit is about $5, which covers about 1,000 Search requests; further Search requests are about $5 per 1,000. A card is required for the credit, and Brave asks for attribution (the result text includes "Web results by Brave Search API").
-2. **GitHub token** — free. This is the provider that searches public file contents. Code search is about 10 requests a minute.
+2. **GitHub token** — free. This is the provider that searches public file contents. Use a token with public-only access: a classic personal access token with only the `public_repo` scope, or a fine-grained token limited to public repositories. Do not use the full `repo` scope. Code search is about 10 requests a minute. Queries are restricted with `is:public`, and private repositories are dropped if one is returned.
 3. **Intelligence X free key** — historical paste bucket. A signed-up free account is about 50 selector searches a day on `free.intelx.io`. Their product page lists Researcher at €2,500/year and the API license (required to embed IntelX in a product offered to others) at €7,000/year. Use a free key for your own lookups.
 4. **Have I Been Pwned** — email breach and paste metadata. Core 1 is $4.39 per month billed annually ($52.68/year) at 10 requests a minute. Higher Core, Pro, and High RPM plans cost more.
 5. **Google Programmable Search** — overlaps Brave. 100 queries a day free, then about $5 per 1,000, with a daily paid cap. Useful as a second index.
@@ -93,15 +93,16 @@ Dork hosts: pastebin.com, paste.ee, justpaste.it, rentry.co, dpaste.com, dpaste.
 
 ## Run locally
 
-Python 3.11 or 3.12.
+Python 3.12.3. `runtime.txt` and Render's `PYTHON_VERSION` pin that version, which is the interpreter the tests pass on.
 
 ```bash
 pip install -r requirements.txt
 export APP_ACCESS_PASSWORD='choose-a-long-password'
+export SESSION_SECRET='replace-with-32-or-more-random-characters'
 uvicorn paste_spotlight.app:app --host 0.0.0.0 --port 8000
 ```
 
-Open `http://127.0.0.1:8000`. There is no default password. If `APP_ACCESS_PASSWORD` is unset, the process still starts (so a platform health check can pass) and the sign-in page explains that searches are closed.
+Open `http://127.0.0.1:8000`. There is no default password and no default session secret. The process refuses to start when `SESSION_SECRET` is missing or shorter than 32 characters. If `APP_ACCESS_PASSWORD` is unset, sign-in stays closed and the sign-in page says so. The devcontainer does not ship a secret; export both variables before it can serve the app.
 
 Optional keys can live in a `.env` file you do not commit. See `.env.example`. Load them into the environment yourself (`set -a; source .env; set +a`) or with the process manager. The app reads the process environment. It does not open `.env` automatically.
 
@@ -122,11 +123,15 @@ python scripts/live_smoke.py --query analyst@example.com --kind email
 
 1. Merge this project to `main` (the service branch in the Blueprint).
 2. Open `https://dashboard.render.com/blueprint/new?repo=<your-https-repo-url>` and apply the Blueprint.
-3. When prompted, set `APP_ACCESS_PASSWORD`. Set `SESSION_SECRET` as well if you want session cookies to survive a password change. Leave API keys blank until you have them.
+3. When prompted, set `APP_ACCESS_PASSWORD`. `SESSION_SECRET` is generated for you (`generateValue: true`). Leave API keys blank until you have them. For `GITHUB_TOKEN`, use public-only access (`public_repo`, or a fine-grained token limited to public repositories).
 4. Confirm the service is live and `https://<service>.onrender.com/health` returns `{"status":"ok"}`.
 5. Sign in and run a search. Providers without keys show **needs key**. GitHub's public search can return hits immediately. psbdmp and Gist show **blocked** with the reason.
 
-Free web services spin down after a period of inactivity. The in-memory search limit resets when the process restarts. That limit is what protects provider quotas: default 8 searches per session per hour and 12 per IP per hour.
+Free web services spin down after a period of inactivity. Search quotas and the last result set used for CSV export are in-memory counters. There is no database on the free plan, so both reset when the process restarts or spins down. They are not shared across instances. The default cap is 8 searches per session per hour and 12 per IP per hour.
+
+Each search has a 25 second deadline. A provider that is still running when that deadline passes is marked **timed out**, with status **error**. That is never reported as **no results**.
+
+Sign-out revokes the session id in this process, so a copied cookie stops working until the revoked-id list rolls over (a few thousand sign-outs) or the process restarts.
 
 `/health`, `/login`, `/robots.txt`, and `/static` are reachable without the password so Render can health-check the service and the sign-in page can load its stylesheet. Every other route checks the session cookie.
 
@@ -135,15 +140,15 @@ Free web services spin down after a period of inactivity. The in-memory search l
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `APP_ACCESS_PASSWORD` | Yes, for sign-in | Password for every page except health, login, robots, and static files. No default. |
-| `SESSION_SECRET` | No | Signs the session cookie. If empty, the app derives a key from the access password. |
+| `SESSION_SECRET` | Yes | Signs the session cookie. At least 32 characters. The process refuses to start without it. Render generates one. It is not derived from the access password. |
 | `SEARCHES_PER_HOUR` | No | Per-session search cap. Default 8. Range 1–60. |
 | `IP_SEARCHES_PER_HOUR` | No | Per-IP search cap. Default 12. Range 1–120. |
 | `LOGIN_ATTEMPTS_PER_HOUR` | No | Per-IP sign-in attempts. Default 10. |
 | `BRAVE_SEARCH_API_KEY` | No | Enables Brave paste-host dorks. |
 | `GOOGLE_CSE_API_KEY` | No | Enables Google Programmable Search. Both Google variables are required together. |
 | `GOOGLE_CSE_ID` | No | Programmable Search engine ID. Turn on "search the entire web". |
-| `GITHUB_TOKEN` | No | Enables code search and raises the limit on commit and repository search. |
-| `HIBP_API_KEY` | No | Enables HIBP breach and paste lookups for email queries. |
+| `GITHUB_TOKEN` | No | Enables code search and raises the limit on commit and repository search. Use public-only access (`public_repo`, or a fine-grained public-repository token). Do not use the full `repo` scope. |
+| `HIBP_API_KEY` | No | Enables HIBP breach and paste lookups for email queries. Other query types are skipped and no request is sent. |
 | `INTELX_API_KEY` | No | Enables Intelligence X. |
 | `INTELX_API_URL` | No | `https://free.intelx.io` (default), `https://2.intelx.io`, or `https://public.intelx.io`. Other hosts are rejected. |
 | `INTELX_BUCKETS` | No | Comma-separated subset of `pastes`, `leaks.public`, `leaks`, `web.public`, `dumpster`, `whois`. Default `pastes,leaks.public`. |
@@ -151,15 +156,20 @@ Free web services spin down after a period of inactivity. The in-memory search l
 | `PASTEBIN_SCRAPING_LIMIT` | No | Recent pastes to list, 1–50. Default 25. At most 5 bodies are read. |
 | `PASTEBIN_SCRAPE_DELAY` | No | Seconds between Pastebin body reads. Default 1, matching Pastebin's guidance. |
 
-Do not commit `.env` or put secret values in `render.yaml`. Keys in the Blueprint are `sync: false`, so Render asks for them in the dashboard.
+Do not commit `.env` or put secret values in `render.yaml`. Secret keys in the Blueprint are `sync: false`, so Render asks for them in the dashboard. `SESSION_SECRET` uses `generateValue: true`.
 
 ## Limits and safety
 
-- Searches are capped per session and per IP.
+- Searches are capped per session and per IP. The counters and the CSV result store are in memory and reset on restart.
+- On Render without Cloudflare, the socket peer is the platform proxy, so the per-IP cap is shared by traffic on that instance. The per-session cap is the control that applies to one signed-in browser. When Cloudflare sits in front, a valid `CF-Connecting-IP` is used. `X-Forwarded-For` is ignored. The start command does not pass `--proxy-headers` or `--forwarded-allow-ips=*`, because that would trust a client-supplied forwarding header and rewrite the socket peer. Secure cookies still read the raw `X-Forwarded-Proto` header.
+- A search waits at most 25 seconds. Unfinished providers are **error** / timed out.
 - Sign-in attempts are capped per IP.
+- Brave query rejections (HTTP 400 or 422), including a query that is too long, are reported as a query error. They do not say the API key was rejected.
+- Google's Custom Search key has to travel in the query string. The app does not log that URL. Log lines pass through a redaction filter, and the `httpx` / `httpcore` loggers stay at warning.
 - Query text is validated. URLs are rejected. The server never requests a URL supplied by the user.
 - Outbound calls use an HTTPS host allow-list and do not follow redirects. `trust_env` is off, so a proxy variable cannot retarget a provider.
 - Pastebin body reads use keys returned by Pastebin and the fixed host `scrape.pastebin.com`.
 - Intelligence X file-read endpoints are not called.
 - CSV cells that start with `=`, `+`, `-`, or `@` are prefixed so a spreadsheet does not treat them as formulas.
 - Unexpected errors return a short message. Stack traces are not sent to the browser.
+- Duplicate provider ids in one form are run once. Unknown ids are dropped. The selection cannot be larger than the known provider list.

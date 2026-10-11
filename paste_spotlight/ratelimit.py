@@ -1,5 +1,10 @@
-"""In-memory hourly limits. One Render free instance keeps a single counter."""
+"""In-memory hourly limits. One Render free instance keeps a single counter.
 
+Counters live in this process only. A restart or spin-down clears them. The free plan
+has no database, so they are not shared across deploys.
+"""
+
+import ipaddress
 import threading
 import time
 
@@ -34,12 +39,27 @@ class RateLimiter:
             self._events.clear()
 
 
+def _valid_ip(value: str) -> str | None:
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
 def client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        parts = [part.strip() for part in forwarded.split(",") if part.strip()]
-        if parts:
-            return parts[-1][:80]
+    """Prefer Cloudflare's client address, then the socket peer.
+
+    X-Forwarded-For is ignored. On Render the last hop is the platform proxy, and a
+    client can append its own value. CF-Connecting-IP is used only when it parses as
+    an IP, which is the case when Cloudflare is the edge that set the header.
+    Without Cloudflare, request.client.host is that proxy, so the per-IP cap is coarse
+    and the per-session cap is the quota that matters.
+    """
+    cloudflare = _valid_ip(request.headers.get("cf-connecting-ip", ""))
+    if cloudflare:
+        return cloudflare
     if request.client and request.client.host:
-        return request.client.host
+        peer = _valid_ip(request.client.host)
+        if peer:
+            return peer
     return "unknown"

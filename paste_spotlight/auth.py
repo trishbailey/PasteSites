@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 from urllib.parse import urlsplit
 
@@ -13,6 +14,10 @@ from paste_spotlight.config import access_password, session_secret
 COOKIE_NAME = "pss_session"
 CSRF_COOKIE = "pss_csrf"
 SESSION_TTL = 12 * 60 * 60
+_MAX_REVOKED = 5000
+_revoked: set[str] = set()
+_revoked_order: list[str] = []
+_revoke_lock = threading.Lock()
 
 
 def password_configured() -> bool:
@@ -68,14 +73,39 @@ def issue_session() -> str:
     return _sign(body)
 
 
+def revoke_session(sid: str) -> None:
+    if not sid:
+        return
+    with _revoke_lock:
+        if sid in _revoked:
+            return
+        _revoked.add(sid)
+        _revoked_order.append(sid)
+        while len(_revoked_order) > _MAX_REVOKED:
+            dropped = _revoked_order.pop(0)
+            _revoked.discard(dropped)
+
+
+def clear_revoked() -> None:
+    with _revoke_lock:
+        _revoked.clear()
+        _revoked_order.clear()
+
+
 def read_session(token: str | None) -> dict | None:
     if not token:
         return None
-    payload = _unsign(token)
+    try:
+        payload = _unsign(token)
+    except RuntimeError:
+        return None
     if not payload:
         return None
     if not isinstance(payload.get("sid"), str) or not isinstance(payload.get("csrf"), str):
         return None
+    with _revoke_lock:
+        if payload["sid"] in _revoked:
+            return None
     return payload
 
 

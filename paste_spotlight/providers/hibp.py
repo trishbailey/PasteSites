@@ -47,8 +47,8 @@ class Hibp(Provider):
             return missing
         if query.kind != "email":
             return self.finish(
-                Status.NO_RESULTS,
-                "HIBP's breach and paste APIs take an email address. No request was sent for this query type.",
+                Status.SKIPPED,
+                "Skipped. Have I Been Pwned searches email addresses only. No request was sent.",
             )
         headers = {
             "hibp-api-key": env_value("HIBP_API_KEY"),

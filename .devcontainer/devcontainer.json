@@ -1,6 +1,6 @@
 {
   "name": "Python 3",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.11-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "customizations": {
     "codespaces": {
       "openFiles": [
@@ -16,7 +16,7 @@
     }
   },
   "updateContentCommand": "pip3 install --user -r requirements.txt -r requirements-dev.txt",
-  "postAttachCommand": "uvicorn paste_spotlight.app:app --host 0.0.0.0 --port 8000",
+  "postAttachCommand": "if [ -n \"$SESSION_SECRET\" ]; then uvicorn paste_spotlight.app:app --host 0.0.0.0 --port 8000; else echo 'Set SESSION_SECRET (32+ random characters) and APP_ACCESS_PASSWORD, then start uvicorn. No default secret is shipped.'; fi",
   "portsAttributes": {
     "8000": {
       "label": "Paste Site Spotlight",

@@ -1,5 +1,7 @@
 """Mocked provider behavior."""
 
+import logging
+
 import httpx
 
 from paste_spotlight.models import SearchQuery, Status
@@ -108,6 +110,7 @@ def test_google_rejects_bad_key(monkeypatch):
 
 def test_github_public_parses_commits_and_repos():
     def handler(request: httpx.Request):
+        assert "is:public" in request.url.params["q"]
         if request.url.path.endswith("/commits"):
             return httpx.Response(
                 200,
@@ -130,9 +133,17 @@ def test_github_public_parses_commits_and_repos():
             json={
                 "items": [
                     {
+                        "full_name": "example/secret",
+                        "html_url": "https://github.com/example/secret",
+                        "description": "Private",
+                        "private": True,
+                        "updated_at": "2024-06-01T00:00:00Z",
+                    },
+                    {
                         "full_name": "example/HelloWorldMessage",
                         "html_url": "https://github.com/example/HelloWorldMessage",
                         "description": "A public demo repository",
+                        "private": False,
                         "updated_at": "2024-06-01T00:00:00Z",
                     }
                 ]
@@ -144,6 +155,62 @@ def test_github_public_parses_commits_and_repos():
     assert len(result.hits) == 2
     assert result.hits[0].timestamp == "2024-05-01T00:00:00Z"
     assert "commit messages" in result.message
+    assert "https://github.com/example/secret" not in [hit.url for hit in result.hits]
+
+
+def test_github_public_error_when_a_call_fails_with_no_hits():
+    def handler(request: httpx.Request):
+        if request.url.path.endswith("/commits"):
+            return httpx.Response(500, text="nope")
+        return httpx.Response(200, json={"items": []})
+
+    result = GitHubPublic().search(SearchQuery("example.com", "domain"), client_for(handler))
+    assert result.status is Status.ERROR
+    assert result.hits == []
+
+
+def test_github_public_flags_incomplete_and_partial_failure():
+    def incomplete(request: httpx.Request):
+        return httpx.Response(
+            200,
+            json={
+                "incomplete_results": True,
+                "items": [
+                    {
+                        "full_name": "example/HelloWorldMessage",
+                        "html_url": "https://github.com/example/HelloWorldMessage",
+                        "description": "A public demo repository",
+                        "updated_at": "2024-06-01T00:00:00Z",
+                    }
+                ],
+            },
+        )
+
+    partial = GitHubPublic().search(SearchQuery("HelloWorldMessage", "keyword"), client_for(incomplete))
+    assert partial.status is Status.OK
+    assert "partial" in partial.message.lower()
+
+    def failed(request: httpx.Request):
+        if request.url.path.endswith("/commits"):
+            return httpx.Response(
+                200,
+                json={
+                    "items": [
+                        {
+                            "sha": "abcdef1234567890",
+                            "html_url": "https://github.com/example/repo/commit/abcdef1234567890",
+                            "commit": {"message": "public hit", "author": {"date": "2024-05-01T00:00:00Z"}},
+                            "repository": {"full_name": "example/repo", "private": False},
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(502, text="bad gateway")
+
+    broken = GitHubPublic().search(SearchQuery("HelloWorldMessage", "keyword"), client_for(failed))
+    assert broken.status is Status.ERROR
+    assert broken.hits
+    assert "partial" in broken.message.lower()
 
 
 def test_github_public_rate_limit():
@@ -166,15 +233,24 @@ def test_github_code_uses_text_match(monkeypatch):
     def handler(request: httpx.Request):
         assert request.headers["Authorization"] == "Bearer gh-test"
         assert request.url.host == "api.github.com"
+        assert "is:public" in request.url.params["q"]
         return httpx.Response(
             200,
             json={
+                "incomplete_results": True,
                 "items": [
+                    {
+                        "name": "secret.py",
+                        "path": "src/secret.py",
+                        "html_url": "https://github.com/example/private/blob/main/src/secret.py",
+                        "repository": {"full_name": "example/private", "private": True},
+                        "text_matches": [{"fragment": "hidden"}],
+                    },
                     {
                         "name": "app.py",
                         "path": "src/app.py",
                         "html_url": "https://github.com/example/repo/blob/main/src/app.py",
-                        "repository": {"full_name": "example/repo"},
+                        "repository": {"full_name": "example/repo", "private": False},
                         "text_matches": [{"fragment": "contact ops@example.com"}],
                     }
                 ]
@@ -184,6 +260,8 @@ def test_github_code_uses_text_match(monkeypatch):
     result = GitHubCode().search(SearchQuery("ops@example.com", "email"), client_for(handler))
     assert result.status is Status.OK
     assert "ops@example.com" in result.hits[0].snippet
+    assert "partial" in result.message.lower()
+    assert len(result.hits) == 1
 
 
 def test_gist_reports_robots_block():
@@ -211,7 +289,8 @@ def test_hibp_needs_key_and_skips_non_email(monkeypatch):
     assert Hibp().search(SearchQuery("a@example.com", "email"), client_for(handler)).status is Status.NEEDS_KEY
     monkeypatch.setenv("HIBP_API_KEY", "hibp-test")
     skipped = Hibp().search(SearchQuery("example.com", "domain"), client_for(handler))
-    assert skipped.status is Status.NO_RESULTS
+    assert skipped.status is Status.SKIPPED
+    assert "skipped" in skipped.message.lower()
     assert called["n"] == 0
     assert "email" in skipped.message
 
@@ -282,6 +361,7 @@ def test_intelx_metadata_only(monkeypatch):
             return httpx.Response(
                 200,
                 json={
+                    "status": 1,
                     "records": [
                         {
                             "name": "paste-record",
@@ -299,6 +379,7 @@ def test_intelx_metadata_only(monkeypatch):
     assert result.hits[0].url.startswith("https://intelx.io/?did=")
     assert "/file/read" not in " ".join(paths)
     assert "/file/view" not in " ".join(paths)
+    assert any(path.endswith("/terminate") for path in paths)
 
 
 def test_pastebin_disabled_by_default(monkeypatch):
@@ -343,4 +424,140 @@ def test_psbdmp_does_not_send_the_query():
     assert result.status is Status.BLOCKED
     assert "Weakpass" in result.message
     assert "No paste query was sent" in result.message
+
+
+def test_brave_query_rejection_does_not_blame_the_key(monkeypatch):
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+    result = BraveDorks().search(
+        SearchQuery("example.com", "domain"),
+        client_for(lambda request: httpx.Response(422, json={"error": "query too long"})),
+    )
+    assert result.status is Status.ERROR
+    assert "query" in result.message.lower()
+    assert "api key" not in result.message.lower()
+
+
+def test_google_key_is_not_logged(monkeypatch, caplog):
+    from paste_spotlight.logutil import install_log_redaction
+
+    secret = "super-secret-google-key"
+    monkeypatch.setenv("GOOGLE_CSE_API_KEY", secret)
+    monkeypatch.setenv("GOOGLE_CSE_ID", "search-engine-id")
+    install_log_redaction()
+    caplog.set_level(logging.DEBUG)
+    logging.getLogger("paste_spotlight").error(
+        "request failed https://www.googleapis.com/customsearch/v1?key=%s&cx=search-engine-id",
+        secret,
+    )
+    try:
+        raise RuntimeError(f"https://www.googleapis.com/customsearch/v1?key={secret}")
+    except RuntimeError:
+        logging.getLogger("paste_spotlight").exception("google call failed")
+    GoogleCse().search(
+        SearchQuery("example.com", "domain"),
+        client_for(lambda request: httpx.Response(500, text="nope")),
+    )
+    assert secret not in caplog.text
+    assert "key=REDACTED" in caplog.text
+
+
+def test_intelx_polls_until_finished_and_terminates(monkeypatch):
+    monkeypatch.setenv("INTELX_API_KEY", "ix-test")
+    monkeypatch.setenv("INTELX_API_URL", "https://free.intelx.io")
+    monkeypatch.setattr("paste_spotlight.providers.intelx.time.sleep", lambda seconds: None)
+    polls = {"n": 0}
+    paths = []
+
+    def handler(request: httpx.Request):
+        paths.append(request.url.path)
+        if request.url.path.endswith("/result"):
+            polls["n"] += 1
+            if polls["n"] == 1:
+                return httpx.Response(200, json={"status": 0, "records": []})
+            if polls["n"] == 2:
+                return httpx.Response(200, json={"status": 3, "records": []})
+            return httpx.Response(
+                200,
+                json={
+                    "status": 1,
+                    "records": [
+                        {
+                            "name": "paste-record",
+                            "date": "2020-01-02T00:00:00Z",
+                            "bucket": "pastes",
+                            "systemid": "8f1c0b2e-1111-2222-3333-abcdefabcdef",
+                        }
+                    ],
+                },
+            )
+        if request.url.path.endswith("/intelligent/search"):
+            return httpx.Response(200, json={"id": "8f1c0b2e-1111-2222-3333-abcdefabcdef"})
+        return httpx.Response(200, json={"status": 0})
+
+    result = IntelX().search(SearchQuery("example.com", "domain"), client_for(handler))
+    assert polls["n"] == 3
+    assert result.status is Status.OK
+    assert any(path.endswith("/terminate") for path in paths)
+
+
+def test_intelx_timeout_is_an_error_not_empty(monkeypatch):
+    monkeypatch.setenv("INTELX_API_KEY", "ix-test")
+    monkeypatch.setenv("INTELX_API_URL", "https://free.intelx.io")
+    clock = {"t": 1000.0}
+    monkeypatch.setattr("paste_spotlight.providers.intelx.time.monotonic", lambda: clock["t"])
+
+    def sleep(seconds):
+        clock["t"] += seconds
+
+    monkeypatch.setattr("paste_spotlight.providers.intelx.time.sleep", sleep)
+    paths = []
+    polls = {"n": 0}
+
+    def handler(request: httpx.Request):
+        paths.append(request.url.path)
+        if request.url.path.endswith("/result"):
+            polls["n"] += 1
+            if polls["n"] == 1:
+                return httpx.Response(
+                    200,
+                    json={
+                        "status": 0,
+                        "records": [
+                            {
+                                "name": "early-record",
+                                "date": "2020-01-02T00:00:00Z",
+                                "bucket": "pastes",
+                                "systemid": "8f1c0b2e-1111-2222-3333-abcdefabcdef",
+                            }
+                        ],
+                    },
+                )
+            return httpx.Response(200, json={"status": 3, "records": []})
+        if request.url.path.endswith("/intelligent/search"):
+            return httpx.Response(200, json={"id": "8f1c0b2e-1111-2222-3333-abcdefabcdef"})
+        return httpx.Response(200, json={"status": 0})
+
+    result = IntelX().search(SearchQuery("example.com", "domain"), client_for(handler))
+    assert result.status is Status.ERROR
+    assert "timed out" in result.message
+    assert result.hits
+    assert any(path.endswith("/terminate") for path in paths)
+
+
+def test_intelx_terminates_when_the_result_call_fails(monkeypatch):
+    monkeypatch.setenv("INTELX_API_KEY", "ix-test")
+    monkeypatch.setenv("INTELX_API_URL", "https://free.intelx.io")
+    paths = []
+
+    def handler(request: httpx.Request):
+        paths.append(request.url.path)
+        if request.url.path.endswith("/result"):
+            return httpx.Response(500, text="nope")
+        if request.url.path.endswith("/intelligent/search"):
+            return httpx.Response(200, json={"id": "8f1c0b2e-1111-2222-3333-abcdefabcdef"})
+        return httpx.Response(200, json={"status": 0})
+
+    result = IntelX().search(SearchQuery("example.com", "domain"), client_for(handler))
+    assert result.status is Status.ERROR
+    assert any(path.endswith("/terminate") for path in paths)
 
