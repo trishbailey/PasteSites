@@ -50,11 +50,24 @@ def _redact_record(record: logging.LogRecord) -> None:
 
     Query-string redaction runs on the formatted message. Doing it earlier would
     eat ``%s`` placeholders and then crash the logger.
+
+    uvicorn's access formatter unpacks ``record.args`` into the client address,
+    method, path, HTTP version, and status. Those records keep a redacted tuple.
+    Other records keep an empty tuple after the message is rendered. ``None`` is
+    not iterable, and uvicorn raises ``TypeError`` on it, which drops the line.
     """
     if isinstance(record.args, dict):
         record.args = {key: _redact_arg(value) for key, value in record.args.items()}
     elif isinstance(record.args, tuple):
         record.args = tuple(_redact_arg(value) for value in record.args)
+
+    if record.name == "uvicorn.access":
+        if isinstance(record.msg, str):
+            record.msg = redact(record.msg)
+        if record.args is None:
+            record.args = ()
+        return
+
     try:
         rendered = record.getMessage()
     except Exception:
@@ -71,7 +84,7 @@ def _redact_record(record: logging.LogRecord) -> None:
     if record.exc_text:
         record.exc_text = redact(record.exc_text)
     record.msg = redact(rendered) + extra
-    record.args = None
+    record.args = ()
 
 
 def _record_factory(*args, **kwargs):
