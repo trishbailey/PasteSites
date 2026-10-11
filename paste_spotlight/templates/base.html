@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Paste Site Spotlight{% endblock %}</title>
+  <meta name="description" content="Search public paste sites and optional breach indexes for an email, domain, username, or keyword.">
+  <meta property="og:title" content="Paste Site Spotlight">
+  <meta property="og:description" content="Search public paste sites and optional breach indexes for an email, domain, username, or keyword.">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#14222b">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="wordmark" href="/">
+        <img src="/static/favicon.svg" alt="" width="28" height="28">
+        <span>Paste Site Spotlight</span>
+      </a>
+      <p class="tagline">Public paste and leak lookups</p>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <p>Informational use. This tool queries public search indexes and optional APIs you configure. It does not bypass access controls, and it does not fetch links you type in. Review each provider’s terms before adding a key.</p>
+    <p><a href="https://beaconintelligencegroup.com/">Beacon Intelligence</a></p>
+  </footer>
+</body>
+</html>

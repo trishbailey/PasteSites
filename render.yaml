@@ -1,0 +1,51 @@
+services:
+  - type: web
+    name: paste-site-spotlight
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: pip install -r requirements.txt
+    # No --proxy-headers and no --forwarded-allow-ips. Those flags trust
+    # X-Forwarded-For and rewrite request.client.host. A client can spoof that
+    # header, and on Render the last hop is the platform proxy. The app reads
+    # CF-Connecting-IP when it is a valid address, otherwise the socket peer.
+    # Secure cookies use the raw X-Forwarded-Proto header and do not need those flags.
+    startCommand: "uvicorn paste_spotlight.app:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: APP_ACCESS_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SEARCHES_PER_HOUR
+        value: "8"
+      - key: IP_SEARCHES_PER_HOUR
+        value: "12"
+      - key: LOGIN_ATTEMPTS_PER_HOUR
+        value: "10"
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: HIBP_API_KEY
+        sync: false
+      - key: INTELX_API_KEY
+        sync: false
+      - key: INTELX_API_URL
+        value: https://free.intelx.io
+      - key: INTELX_BUCKETS
+        value: pastes,leaks.public
+      - key: PASTEBIN_SCRAPING_ENABLED
+        value: "false"
+      - key: PASTEBIN_SCRAPING_LIMIT
+        value: "25"
+      - key: PASTEBIN_SCRAPE_DELAY
+        value: "1"
