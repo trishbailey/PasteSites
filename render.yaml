@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: paste-site-spotlight
+    runtime: python
+    plan: free
+    region: oregon
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: pip install -r requirements.txt
+    startCommand: "uvicorn paste_spotlight.app:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips=*"
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ACCESS_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: SEARCHES_PER_HOUR
+        value: "8"
+      - key: IP_SEARCHES_PER_HOUR
+        value: "12"
+      - key: LOGIN_ATTEMPTS_PER_HOUR
+        value: "10"
+      - key: BRAVE_SEARCH_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ID
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: HIBP_API_KEY
+        sync: false
+      - key: INTELX_API_KEY
+        sync: false
+      - key: INTELX_API_URL
+        value: https://free.intelx.io
+      - key: INTELX_BUCKETS
+        value: pastes,leaks.public
+      - key: PASTEBIN_SCRAPING_ENABLED
+        value: "false"
+      - key: PASTEBIN_SCRAPING_LIMIT
+        value: "25"
+      - key: PASTEBIN_SCRAPE_DELAY
+        value: "1"

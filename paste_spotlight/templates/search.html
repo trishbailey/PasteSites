@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Paste Site Spotlight{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="title-row">
+    <div>
+      <h1>Search</h1>
+      <p class="lede">Look up an email, domain, username, or keyword. Each provider reports its own status, including when it needs a key or is unavailable.</p>
+    </div>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="ghost">Sign out</button>
+    </form>
+  </div>
+  <p class="quota">Searches left this hour: <strong>{{ remaining }}</strong> of {{ limit }}.</p>
+  {% if error %}
+  <p class="banner warn" role="alert">{{ error }}</p>
+  {% endif %}
+  <form method="post" action="/search" class="stack">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="q">Query</label>
+    <input id="q" name="q" type="text" maxlength="200" required value="{{ query }}" placeholder="name@example.com" autocomplete="off">
+    <label for="kind">Query type</label>
+    <select id="kind" name="kind">
+      {% for option in ["email", "domain", "username", "keyword"] %}
+      <option value="{{ option }}" {% if kind == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    <fieldset>
+      <legend>Providers</legend>
+      <ul class="provider-list">
+        {% for provider in providers %}
+        <li>
+          <label class="provider">
+            <input type="checkbox" name="providers" value="{{ provider.id }}" {% if provider.checked %}checked{% endif %}>
+            <span>
+              <span class="provider-name">{{ provider.name }}</span>
+              <span class="pill {{ provider.readiness }}">{{ provider.readiness|replace("_", " ") }}</span>
+              <span class="summary">{{ provider.summary }}</span>
+            </span>
+          </label>
+        </li>
+        {% endfor %}
+      </ul>
+    </fieldset>
+    <button type="submit">Search</button>
+  </form>
+  <details class="why">
+    <summary>Why the previous tool returned nothing</summary>
+    <p>SelectorScope never opened a paste site. The only network call was Google Programmable Search, one <code>site:</code> query per site, and it ran only when both an API key and a search-engine ID were present. This repository has no key. A call without a key returns HTTP 403. When a search did run and Google returned no items, the page said “No results found” with no per-site status. Dead hosts, Cloudflare challenges, and missing indexes looked the same as a clean miss.</p>
+  </details>
+</section>
+
+{% if results is not none %}
+<section class="panel">
+  <div class="title-row">
+    <h2>{{ hit_count }} matching record{{ "" if hit_count == 1 else "s" }}</h2>
+    <form method="post" action="/export.csv">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="ghost">Export CSV</button>
+    </form>
+  </div>
+  <ul class="status-list">
+    {% for provider in results %}
+    <li class="status-card">
+      <div class="status-head">
+        <h3>{{ provider.name }}</h3>
+        <span class="pill {{ provider.status }}">{{ provider.status|replace("_", " ") }}</span>
+      </div>
+      <p>{{ provider.message }}</p>
+      {% if provider.hits %}
+      <ul class="hits">
+        {% for hit in provider.hits %}
+        <li>
+          {% if hit.url %}
+          <a href="{{ hit.url }}" rel="noopener noreferrer">{{ hit.title or hit.url }}</a>
+          {% else %}
+          <strong>{{ hit.title }}</strong>
+          {% endif %}
+          <p class="meta">
+            {% if hit.source %}<span>{{ hit.source }}</span>{% endif %}
+            {% if hit.timestamp %}<span>{{ hit.timestamp }}</span>{% endif %}
+          </p>
+          {% if hit.snippet %}
+          <p class="snippet">{{ hit.snippet|highlight(query) }}</p>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}
