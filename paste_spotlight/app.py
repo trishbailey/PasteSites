@@ -226,6 +226,12 @@ def health():
     return JSONResponse({"status": "ok"})
 
 
+@app.head("/")
+def head_root():
+    """Render's port probe uses HEAD /. A GET-only route answers 405."""
+    return Response(status_code=204)
+
+
 @app.get("/robots.txt")
 def robots():
     return Response("User-agent: *\nDisallow: /\n", media_type="text/plain")

@@ -461,6 +461,47 @@ def test_google_key_is_not_logged(monkeypatch, caplog):
     assert "key=REDACTED" in caplog.text
 
 
+def test_uvicorn_access_record_survives_redaction(capsys):
+    from uvicorn.logging import AccessFormatter
+
+    from paste_spotlight.logutil import install_log_redaction
+
+    install_log_redaction()
+    formatter = AccessFormatter(
+        '%(client_addr)s - "%(request_line)s" %(status_code)s',
+        use_colors=False,
+    )
+    logger = logging.getLogger("uvicorn.access")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    try:
+        logger.info(
+            '%s - "%s %s HTTP/%s" %d',
+            "10.0.0.8:4000",
+            "HEAD",
+            "/?key=super-secret-google-key",
+            "1.1",
+            204,
+        )
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
+
+    captured = capsys.readouterr()
+    combined = captured.out + captured.err
+    assert "Logging error" not in combined
+    assert "TypeError" not in combined
+    assert 'HEAD /?key=REDACTED HTTP/1.1' in combined
+    assert "204" in combined
+    assert "super-secret-google-key" not in combined
+
+
 def test_intelx_polls_until_finished_and_terminates(monkeypatch):
     monkeypatch.setenv("INTELX_API_KEY", "ix-test")
     monkeypatch.setenv("INTELX_API_URL", "https://free.intelx.io")

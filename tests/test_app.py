@@ -32,6 +32,11 @@ def test_health_is_public(client):
     assert response.json() == {"status": "ok"}
 
 
+def test_head_root_answers_the_port_probe(client):
+    response = client.head("/")
+    assert response.status_code == 204
+
+
 def test_search_requires_login(client):
     response = client.get("/", follow_redirects=False)
     assert response.status_code == 303
