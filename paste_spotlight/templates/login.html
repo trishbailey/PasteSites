@@ -1,21 +1,31 @@
-{% extends "base.html" %}
-{% block title %}Sign in · Paste Site Spotlight{% endblock %}
-{% block content %}
-<section class="panel narrow">
-  <h1>Sign in</h1>
-  <p class="lede">This lookup is password-protected. The password is the <code>APP_ACCESS_PASSWORD</code> environment variable. There is no default.</p>
-  {% if not configured %}
-  <p class="banner warn">The owner has not set <code>APP_ACCESS_PASSWORD</code> yet, so searches stay closed.</p>
-  {% endif %}
-  {% if error %}
-  <p class="banner warn" role="alert">{{ error }}</p>
-  {% endif %}
-  <form method="post" action="/login" class="stack">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="next" value="{{ next }}">
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit">Continue</button>
-  </form>
-</section>
-{% endblock %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Paste Site Spotlight</title>
+  <meta name="theme-color" content="#11273C">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <p class="login-brand">Paste Site Spotlight</p>
+    <h1>Sign in</h1>
+    <p class="lede">This lookup is password-protected. The password is the <code>APP_ACCESS_PASSWORD</code> environment variable. There is no default.</p>
+    {% if not configured %}
+    <p class="banner warn">The owner has not set <code>APP_ACCESS_PASSWORD</code> yet, so searches stay closed.</p>
+    {% endif %}
+    {% if error %}
+    <p class="banner warn" role="alert">{{ error }}</p>
+    {% endif %}
+    <form method="post" action="/login" class="stack">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit">Continue</button>
+    </form>
+  </main>
+</body>
+</html>

@@ -229,3 +229,70 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fo
   button, button.ghost { width: 100%; }
   .title-row form, .title-row button { width: 100%; }
 }
+
+/* Shared navy sign-in page (matches the Beacon tools login design). */
+.login-body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(160deg, rgba(17, 39, 60, 0.96), rgba(17, 39, 60, 0.88)),
+    #11273C;
+  color: #1c2b39;
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+.login-card {
+  box-sizing: border-box;
+  width: min(440px, calc(100% - 2rem));
+  background: #ffffff;
+  padding: 1.6rem 1.5rem 1.4rem;
+  border-radius: 10px;
+  border: 0;
+  box-shadow: none;
+}
+.login-card .login-brand {
+  margin: 0;
+  color: #087F8C;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+}
+.login-card h1 {
+  font-family: Palatino, "Palatino Linotype", "Iowan Old Style", Georgia, serif;
+  font-weight: 600;
+  font-size: 2rem;
+  line-height: 1.25;
+  color: #1c2b39;
+  margin: 0 0 0.6rem;
+}
+.login-card .lede { color: #526273; font-size: 1.05rem; }
+.login-card label { display: block; font-weight: 600; margin: 0.9rem 0 0.3rem; color: #1c2b39; }
+.login-card input[type="password"] {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  color: #1c2b39;
+  background: #ffffff;
+  border: 1px solid #c5d0db;
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem;
+}
+.login-card button[type="submit"] {
+  display: block;
+  width: 100%;
+  margin: 1rem 0 0;
+  background: #087F8C;
+  color: #ffffff;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.6rem 0.75rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.login-card button[type="submit"]:hover { filter: brightness(1.08); }
+.login-card button[type="submit"]:focus-visible,
+.login-card input:focus-visible { outline: 3px solid #087F8C; outline-offset: 2px; }
